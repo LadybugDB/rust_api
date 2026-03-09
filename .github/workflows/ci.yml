@@ -18,10 +18,37 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LBUG_VERSION: main
+      CARGO_HOME: ${{ github.workspace }}/.cargo
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Setup ccache (Linux)
+        if: runner.os == 'Linux'
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: precompiled-bin-${{ runner.os }}-${{ runner.arch }}-${{ github.ref }}
+          max-size: 2G
+          create-symlink: true
+          restore-keys: |
+            precompiled-bin-${{ runner.os }}-${{ runner.arch }}-refs/heads/main
+            precompiled-bin-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.cargo/registry
+            ${{ github.workspace }}/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
 
       - name: Build
         run: cargo build --release
