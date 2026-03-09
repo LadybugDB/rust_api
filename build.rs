@@ -55,6 +55,7 @@ fn link_libraries() {
             "lz4",
             "roaring_bitmap",
             "simsimd",
+            "yyjson",
         ] {
             if rustversion::cfg!(since(1.82)) {
                 println!("cargo:rustc-link-lib=static:+whole-archive={lib}");
@@ -114,6 +115,7 @@ fn build_bundled_cmake() -> Vec<PathBuf> {
         "lz4",
         "roaring_bitmap",
         "simsimd",
+        "yyjson",
     ] {
         let lib_path = build_dir
             .join("build")
