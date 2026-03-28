@@ -21,6 +21,9 @@ pub(crate) mod ffi_arrow {
 
         #[namespace = "lbug::main"]
         type QueryResult<'db> = crate::ffi::ffi::QueryResult<'db>;
+
+        #[namespace = "lbug::main"]
+        type Connection<'db> = crate::ffi::ffi::Connection<'db>;
     }
 
     unsafe extern "C++" {
@@ -38,5 +41,22 @@ pub(crate) mod ffi_arrow {
 
         #[namespace = "lbug_arrow"]
         fn query_result_get_arrow_schema<'db>(result: &QueryResult<'db>) -> Result<ArrowSchema>;
+    }
+
+    // Zero-copy Arrow import
+    unsafe extern "C++" {
+        #[namespace = "lbug_arrow"]
+        fn create_node_table_from_arrow<'db>(
+            connection: Pin<&mut Connection<'db>>,
+            table_name: &str,
+            schema: ArrowSchema,
+            array: ArrowArray,
+        ) -> Result<String>;
+
+        #[namespace = "lbug_arrow"]
+        fn drop_arrow_table<'db>(
+            connection: Pin<&mut Connection<'db>>,
+            table_name: &str,
+        ) -> Result<()>;
     }
 }

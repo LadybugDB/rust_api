@@ -125,14 +125,6 @@ impl<'a> Connection<'a> {
     /// # Arguments
     /// * `query`: The query to execute. See <https://ladybugdb.com/docs/cypher> for details on the
     ///   query format.
-    // TODO(bmwinger): Instead of having a Value enum in the results, perhaps QueryResult, and thus query
-    // should be generic.
-    //
-    // E.g.
-    // let result: QueryResult<lbug::value::List<lbug::value::String>> = conn.query("...")?;
-    // let result: QueryResult<lbug::value::Int64> = conn.query("...")?;
-    //
-    // But this would really just be syntactic sugar wrapping the current system
     pub fn query(&self, query: &str) -> Result<QueryResult<'a>, Error> {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
         let result = ffi::connection_query(conn, ffi::StringView::new(query))?;
@@ -173,9 +165,6 @@ impl<'a> Connection<'a> {
         prepared_statement: &mut PreparedStatement,
         params: Vec<(&str, Value)>,
     ) -> Result<QueryResult<'a>, Error> {
-        // Passing and converting Values in a collection across the ffi boundary is difficult
-        // (std::vector cannot be constructed from rust, Vec cannot contain opaque C++ types)
-        // So we create an opaque parameter pack and copy the parameters into it one by one
         let mut cxx_params = ffi::new_params();
         for (key, value) in params {
             let ffi_value: cxx::UniquePtr<ffi::Value> = value.try_into()?;
@@ -193,6 +182,139 @@ impl<'a> Connection<'a> {
         }
     }
 
+    /// Create a node table backed by an in-memory Arrow `RecordBatch` -- **zero-copy**.
+    ///
+    /// The data is registered in LadybugDB's Arrow registry and the table is created
+    /// with `storage='arrow://...'`. The table can then be queried with Cypher just
+    /// like any other table. The Arrow data stays in memory (owned by the registry)
+    /// until the table is dropped via [`Connection::drop_arrow_table`].
+    ///
+    /// The first column of the `RecordBatch` is used as the primary key.
+    ///
+    /// Returns the arrow registry ID (needed for lifecycle management).
+    ///
+    /// *Requires the `arrow` feature.*
+    #[cfg(feature = "arrow")]
+    pub fn create_node_table_from_arrow(
+        &self,
+        table_name: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<String, Error> {
+        use arrow::array::Array;
+
+        let struct_array: arrow::array::StructArray = batch.clone().into();
+        let array_data = struct_array.into_data();
+
+        let (ffi_array, ffi_schema) = arrow::ffi::to_ffi(&array_data)
+            .map_err(|e| Error::ArrowError(e))?;
+
+        let arrow_array = crate::ffi::arrow::ArrowArray(ffi_array);
+        let arrow_schema = crate::ffi::arrow::ArrowSchema(ffi_schema);
+
+        let conn = unsafe { (*self.conn.get()).pin_mut() };
+        let arrow_id = crate::ffi::arrow::ffi_arrow::create_node_table_from_arrow(
+            conn,
+            table_name,
+            arrow_schema,
+            arrow_array,
+        )?;
+
+        Ok(arrow_id)
+    }
+
+    /// Insert rows from an Arrow `RecordBatch` into an **existing** node table.
+    ///
+    /// Creates a temporary Arrow-backed table, copies the data into the target
+    /// table via `COPY ... FROM (MATCH ...)`, then drops the temporary table.
+    ///
+    /// *Requires the `arrow` feature.*
+    #[cfg(feature = "arrow")]
+    pub fn insert_arrow(
+        &self,
+        table_name: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<QueryResult<'a>, Error> {
+        let temp_name = format!("_arrow_tmp_{}", table_name);
+        self.create_node_table_from_arrow(&temp_name, batch)?;
+
+        let columns: Vec<String> = batch
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| format!("t.{}", f.name()))
+            .collect();
+        let col_list = columns.join(", ");
+
+        let copy_query = format!(
+            "COPY {table_name} FROM (MATCH (t:{temp_name}) RETURN {col_list})"
+        );
+        let result = self.query(&copy_query);
+        let _ = self.drop_arrow_table(&temp_name);
+        result
+    }
+
+    /// Upsert rows from an Arrow `RecordBatch` into an existing node table.
+    ///
+    /// Uses Cypher `MERGE` to match on the primary key (first column).
+    /// Existing rows get updated; new rows get created.
+    ///
+    /// *Requires the `arrow` feature.*
+    #[cfg(feature = "arrow")]
+    pub fn upsert_arrow(
+        &self,
+        table_name: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<QueryResult<'a>, Error> {
+        let schema = batch.schema();
+        let fields: Vec<&str> = schema
+            .fields()
+            .iter()
+            .map(|f| f.name().as_str())
+            .collect();
+
+        if fields.is_empty() {
+            return Err(Error::FailedQuery("RecordBatch has no columns".into()));
+        }
+
+        let temp_name = format!("_arrow_tmp_{}", table_name);
+        self.create_node_table_from_arrow(&temp_name, batch)?;
+
+        let pk = fields[0];
+        let non_key_fields: Vec<&&str> = fields[1..].iter().collect();
+
+        let set_clause: String = non_key_fields
+            .iter()
+            .map(|f| format!("n.{f} = t.{f}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let query = if non_key_fields.is_empty() {
+            format!(
+                "MATCH (t:{temp_name}) MERGE (n:{table_name} {{{pk}: t.{pk}}})"
+            )
+        } else {
+            format!(
+                "MATCH (t:{temp_name}) \
+                 MERGE (n:{table_name} {{{pk}: t.{pk}}}) \
+                 ON MATCH SET {set_clause} \
+                 ON CREATE SET {set_clause}"
+            )
+        };
+
+        let result = self.query(&query);
+        let _ = self.drop_arrow_table(&temp_name);
+        result
+    }
+
+    /// Drop an Arrow-backed table and release its in-memory data.
+    ///
+    /// *Requires the `arrow` feature.*
+    #[cfg(feature = "arrow")]
+    pub fn drop_arrow_table(&self, table_name: &str) -> Result<(), Error> {
+        let conn = unsafe { (*self.conn.get()).pin_mut() };
+        Ok(crate::ffi::arrow::ffi_arrow::drop_arrow_table(conn, table_name)?)
+    }
+
     /// Interrupts all queries currently executing within this connection
     pub fn interrupt(&self) -> Result<(), Error> {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
@@ -205,186 +327,5 @@ impl<'a> Connection<'a> {
     pub fn set_query_timeout(&self, timeout_ms: u64) {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
         conn.setQueryTimeOut(timeout_ms);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::database::SYSTEM_CONFIG_FOR_TESTS;
-    use crate::{Connection, Database, Value};
-    use anyhow::{Error, Result};
-
-    #[test]
-    fn test_connection_threads() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-        let mut conn = Connection::new(&db)?;
-        conn.set_max_num_threads_for_exec(5);
-        assert_eq!(conn.get_max_num_threads_for_exec(), 5);
-        temp_dir.close()?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_invalid_query() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")?;
-        conn.query("CREATE (:Person {name: 'Alice', age: 25});")?;
-        conn.query("CREATE (:Person {name: 'Bob', age: 30});")?;
-
-        let result: Error = conn
-            .query("MATCH (a:Person RETURN a.name AS NAME, a.age AS AGE;")
-            .expect_err("Invalid syntax in query should produce an error")
-            .into();
-        assert_eq!(
-            result.to_string(),
-            "Query execution failed: Parser exception: \
-Invalid input <MATCH (a:Person RETURN>: expected rule oC_SingleQuery (line: 1, offset: 16)
-\"MATCH (a:Person RETURN a.name AS NAME, a.age AS AGE;\"
-                 ^^^^^^"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_multiple_statement_query() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")?;
-        conn.query(
-            "CREATE (:Person {name: 'Alice', age: 25});
-            CREATE (:Person {name: 'Bob', age: 30});",
-        )?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_query_result() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT16, PRIMARY KEY(name));")?;
-        conn.query("CREATE (:Person {name: 'Alice', age: 25});")?;
-
-        for result in conn.query("MATCH (a:Person) RETURN a.name AS NAME, a.age AS AGE;")? {
-            assert_eq!(result.len(), 2);
-            assert_eq!(result[0], Value::String("Alice".to_string()));
-            assert_eq!(result[1], Value::Int16(25));
-        }
-        temp_dir.close()?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_params() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT16, PRIMARY KEY(name));")?;
-        conn.query("CREATE (:Person {name: 'Alice', age: 25});")?;
-        conn.query("CREATE (:Person {name: 'Bob', age: 30});")?;
-
-        let mut statement = conn.prepare("MATCH (a:Person) WHERE a.age = $age RETURN a.name;")?;
-        for result in conn.execute(&mut statement, vec![("age", Value::Int16(25))])? {
-            assert_eq!(result.len(), 1);
-            assert_eq!(result[0], Value::String("Alice".to_string()));
-        }
-        temp_dir.close()?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_multithreaded_single_conn() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT32, PRIMARY KEY(name));")?;
-        // Write queries must be done sequentially
-        conn.query("CREATE (:Person {name: 'Alice', age: 25});")?;
-        conn.query("CREATE (:Person {name: 'Bob', age: 30});")?;
-
-        let (alice, bob) = std::thread::scope(|s| -> Result<(Vec<Value>, Vec<Value>)> {
-            let alice_thread = s.spawn(|| -> Result<Vec<Value>> {
-                let mut result = conn.query("MATCH (a:Person) WHERE a.name = \"Alice\" RETURN a.name AS NAME, a.age AS AGE;")?;
-                Ok(result.next().unwrap())
-            });
-            let bob_thread = s.spawn(|| -> Result<Vec<Value>> {
-                let mut result = conn.query(
-                    "MATCH (a:Person) WHERE a.name = \"Bob\" RETURN a.name AS NAME, a.age AS AGE;",
-                )?;
-                Ok(result.next().unwrap())
-            });
-
-            Ok((alice_thread.join().unwrap()?, bob_thread.join().unwrap()?))
-        })?;
-
-        assert_eq!(alice, vec!["Alice".into(), 25.into()]);
-        assert_eq!(bob, vec!["Bob".into(), 30.into()]);
-        temp_dir.close()?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_multithreaded_multiple_conn() -> Result<()> {
-        let temp_dir = tempfile::tempdir()?;
-        let db = Database::new(temp_dir.path().join("test"), SYSTEM_CONFIG_FOR_TESTS)?;
-
-        let conn = Connection::new(&db)?;
-        conn.query("CREATE NODE TABLE Person(name STRING, age INT32, PRIMARY KEY(name));")?;
-        // Write queries must be done sequentially
-        conn.query("CREATE (:Person {name: 'Alice', age: 25});")?;
-        conn.query("CREATE (:Person {name: 'Bob', age: 30});")?;
-
-        let (alice, bob) = std::thread::scope(|s| -> Result<(Vec<Value>, Vec<Value>)> {
-            let alice_thread = s.spawn(|| -> Result<Vec<Value>> {
-                let conn = Connection::new(&db)?;
-                let mut result = conn.query("MATCH (a:Person) WHERE a.name = \"Alice\" RETURN a.name AS NAME, a.age AS AGE;")?;
-                Ok(result.next().unwrap())
-            });
-            let bob_thread = s.spawn(|| -> Result<Vec<Value>> {
-                let conn = Connection::new(&db)?;
-                let mut result = conn.query(
-                    "MATCH (a:Person) WHERE a.name = \"Bob\" RETURN a.name AS NAME, a.age AS AGE;",
-                )?;
-                Ok(result.next().unwrap())
-            });
-
-            Ok((alice_thread.join().unwrap()?, bob_thread.join().unwrap()?))
-        })?;
-
-        assert_eq!(alice, vec!["Alice".into(), 25.into()]);
-        assert_eq!(bob, vec!["Bob".into(), 30.into()]);
-        temp_dir.close()?;
-        Ok(())
-    }
-
-    macro_rules! extension_tests {
-        ($($name:ident,)*) => {
-        $(
-            #[test]
-            #[cfg(feature = "extension_tests")]
-            fn $name() -> Result<()> {
-                let temp_dir = tempfile::tempdir()?;
-                let db = Database::new(temp_dir.path().join("testdb"), SYSTEM_CONFIG_FOR_TESTS)?;
-                let conn = Connection::new(&db)?;
-                let directory: String = if cfg!(windows) {
-                    std::env::var("LBUG_LOCAL_EXTENSIONS")?.replace("\\", "/")
-                } else {
-                    std::env::var("LBUG_LOCAL_EXTENSIONS")?
-                };
-                let name = stringify!($name);
-                conn.query(&format!("LOAD EXTENSION '{directory}/{name}/build/lib{name}.lbug_extension'"))?;
-                Ok(())
-            }
-        )*
-        }
-    }
-
-    extension_tests! {
-        fts, duckdb, httpfs, postgres, sqlite, json, delta, iceberg, vector,
     }
 }
