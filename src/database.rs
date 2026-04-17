@@ -362,10 +362,10 @@ mod tests {
             SYSTEM_CONFIG_FOR_TESTS.enable_multi_writes(true),
         )?;
         let conn1 = Connection::new(&db)?;
-        conn1.query("BEGIN TRANSACTION;")?;
-        conn1.query("CREATE NODE TABLE t(a INT, b INT, PRIMARY KEY(a));")?;
+        conn1.query("BEGIN TRANSACTION")?;
+        conn1.query("CREATE NODE TABLE t(a INT, b INT, PRIMARY KEY(a))")?;
         let conn2 = Connection::new(&db)?;
-        conn2.query("BEGIN TRANSACTION;")?;
+        conn2.query("BEGIN TRANSACTION")?;
         Ok(())
     }
 }
