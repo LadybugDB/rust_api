@@ -1,11 +1,15 @@
 """Updates the version in Cargo.toml to match the version in the main CMakeLists.txt"""
 
-import os
 import re
 from pathlib import Path
 
 LBUG_RS_ROOT = Path(__file__).parent
-LBUG_ROOT = LBUG_RS_ROOT.parent / "ladybug"
+SIBLING_LBUG_ROOT = LBUG_RS_ROOT.parent / "ladybug"
+LBUG_ROOT = (
+    SIBLING_LBUG_ROOT
+    if SIBLING_LBUG_ROOT.exists()
+    else LBUG_RS_ROOT.parent.parent
+)
 
 
 def get_lbug_version():
