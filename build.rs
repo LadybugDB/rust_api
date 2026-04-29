@@ -15,7 +15,7 @@ fn get_target() -> String {
     env::var("PROFILE").unwrap()
 }
 
-fn link_libraries(link_bundled_deps: bool) {
+fn link_libraries(link_bundled_deps: bool, prebuilt_lbug_root: Option<&Path>) {
     // This also needs to be set by any crates using it if they want to use extensions
     if !cfg!(windows) && link_mode() == "static" {
         println!("cargo:rustc-link-arg=-rdynamic");
@@ -41,6 +41,9 @@ fn link_libraries(link_bundled_deps: bool) {
         }
 
         if !link_bundled_deps {
+            if let Some(lbug_root) = prebuilt_lbug_root {
+                link_prebuilt_libraries(lbug_root);
+            }
             return;
         }
 
@@ -68,6 +71,36 @@ fn link_libraries(link_bundled_deps: bool) {
             } else {
                 println!("cargo:rustc-link-lib=static={lib}");
             }
+        }
+    }
+}
+
+fn link_prebuilt_libraries(lbug_root: &Path) {
+    let build_dir = lbug_root.join("build").join("release");
+    for (dir, lib) in [
+        ("antlr4_cypher", "antlr4_cypher"),
+        ("antlr4_runtime", "antlr4_runtime"),
+        ("brotli", "brotlidec"),
+        ("brotli", "brotlicommon"),
+        ("utf8proc", "utf8proc"),
+        ("re2", "re2"),
+        ("fastpfor", "fastpfor"),
+        ("parquet", "parquet"),
+        ("snappy", "snappy"),
+        ("thrift", "thrift"),
+        ("yyjson", "yyjson"),
+        ("zstd", "zstd"),
+        ("miniz", "miniz"),
+        ("mbedtls", "mbedtls"),
+        ("lz4", "lz4"),
+        ("roaring_bitmap", "roaring_bitmap"),
+        ("simsimd", "simsimd"),
+    ] {
+        let lib_dir = build_dir.join("third_party").join(dir);
+        let lib_path = lib_dir.join(format!("lib{lib}.a"));
+        if lib_path.exists() {
+            println!("cargo:rustc-link-search=native={}", lib_dir.display());
+            println!("cargo:rustc-link-lib=static={lib}");
         }
     }
 }
@@ -128,7 +161,7 @@ fn try_download_prebuilt_lbug(manifest_dir: &Path) -> bool {
     }
 }
 
-fn use_prebuilt_lbug(manifest_dir: &Path) -> Option<Vec<PathBuf>> {
+fn use_prebuilt_lbug(manifest_dir: &Path) -> Option<(Vec<PathBuf>, PathBuf)> {
     if !try_download_prebuilt_lbug(manifest_dir) {
         return None;
     }
@@ -141,10 +174,7 @@ fn use_prebuilt_lbug(manifest_dir: &Path) -> Option<Vec<PathBuf>> {
         "cargo:warning=Using prebuilt liblbug from {}",
         lib_dir.join(static_lbug_file_name()).display()
     );
-    Some(vec![
-        lib_dir,
-        lbug_root.join("src/include"),
-    ])
+    Some((vec![lib_dir, lbug_root.join("src/include")], lbug_root))
 }
 
 fn get_lbug_root() -> PathBuf {
@@ -337,6 +367,7 @@ fn main() {
     let manifest_dir = manifest_dir();
     let mut bundled = false;
     let mut link_bundled_deps = false;
+    let mut prebuilt_lbug_root = None;
     let mut include_paths = vec![manifest_dir.join("include")];
 
     if let (Ok(lbug_lib_dir), Ok(lbug_include)) =
@@ -345,15 +376,16 @@ fn main() {
         println!("cargo:rustc-link-search=native={lbug_lib_dir}");
         println!("cargo:rustc-link-arg=-Wl,-rpath,{lbug_lib_dir}");
         include_paths.push(Path::new(&lbug_include).to_path_buf());
-    } else if let Some(prebuilt_include_paths) = use_prebuilt_lbug(&manifest_dir) {
+    } else if let Some((prebuilt_include_paths, lbug_root)) = use_prebuilt_lbug(&manifest_dir) {
         include_paths.extend(prebuilt_include_paths);
+        prebuilt_lbug_root = Some(lbug_root);
     } else {
         include_paths.extend(build_bundled_cmake());
         bundled = true;
         link_bundled_deps = true;
     }
     if link_mode() == "static" {
-        link_libraries(link_bundled_deps);
+        link_libraries(link_bundled_deps, prebuilt_lbug_root.as_deref());
     }
     build_ffi(
         "src/ffi.rs",
@@ -373,6 +405,6 @@ fn main() {
         );
     }
     if link_mode() == "dylib" {
-        link_libraries(link_bundled_deps);
+        link_libraries(link_bundled_deps, prebuilt_lbug_root.as_deref());
     }
 }
