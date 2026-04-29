@@ -158,8 +158,9 @@ pub(crate) mod ffi {
     #[namespace = "lbug::main"]
     unsafe extern "C++" {
         type PreparedStatement;
-        fn isSuccess(&self) -> bool;
 
+        #[namespace = "lbug_rs"]
+        fn prepared_statement_is_success(statement: &PreparedStatement) -> bool;
         #[namespace = "lbug_rs"]
         fn prepared_statement_error_message(statement: &PreparedStatement) -> String;
 
@@ -174,7 +175,7 @@ pub(crate) mod ffi {
         // Simple types which cross the ffi without problems
         // Non-copyable types are references so that they only need to be cloned on the
         // C++ side of things
-        fn insert(self: Pin<&mut Self>, key: &str, value: UniquePtr<Value>);
+        fn query_params_insert(params: Pin<&mut QueryParams>, key: &str, value: UniquePtr<Value>);
 
         fn new_params() -> UniquePtr<QueryParams>;
     }
@@ -210,8 +211,9 @@ pub(crate) mod ffi {
         #[namespace = "lbug_rs"]
         fn database_connect(database: Pin<&mut Database>) -> Result<UniquePtr<Connection<'_>>>;
 
-        fn prepare(
-            self: Pin<&mut Connection>,
+        #[namespace = "lbug_rs"]
+        fn connection_prepare(
+            connection: Pin<&mut Connection>,
             query: StringView<'_>,
         ) -> Result<UniquePtr<PreparedStatement>>;
 
@@ -228,10 +230,17 @@ pub(crate) mod ffi {
             query: StringView<'a>,
         ) -> Result<UniquePtr<QueryResult<'db>>>;
 
-        fn getMaxNumThreadForExec(self: Pin<&mut Connection>) -> u64;
-        fn setMaxNumThreadForExec(self: Pin<&mut Connection>, num_threads: u64);
-        fn interrupt(self: Pin<&mut Connection>) -> Result<()>;
-        fn setQueryTimeOut(self: Pin<&mut Connection>, timeout_ms: u64);
+        #[namespace = "lbug_rs"]
+        fn connection_get_max_num_thread_for_exec(connection: Pin<&mut Connection>) -> u64;
+        #[namespace = "lbug_rs"]
+        fn connection_set_max_num_thread_for_exec(
+            connection: Pin<&mut Connection>,
+            num_threads: u64,
+        );
+        #[namespace = "lbug_rs"]
+        fn connection_interrupt(connection: Pin<&mut Connection>) -> Result<()>;
+        #[namespace = "lbug_rs"]
+        fn connection_set_query_timeout(connection: Pin<&mut Connection>, timeout_ms: u64);
     }
 
     #[namespace = "lbug::main"]
@@ -242,18 +251,23 @@ pub(crate) mod ffi {
 
         #[namespace = "lbug_rs"]
         fn query_result_to_string(query_result: &QueryResult) -> String;
-        fn isSuccess(&self) -> bool;
+        #[namespace = "lbug_rs"]
+        fn query_result_is_success(query_result: &QueryResult) -> bool;
         #[namespace = "lbug_rs"]
         fn query_result_get_error_message(query_result: &QueryResult) -> String;
-        fn hasNext(&self) -> bool;
-        fn getNext(self: Pin<&mut QueryResult>) -> SharedPtr<FlatTuple>;
+        #[namespace = "lbug_rs"]
+        fn query_result_has_next(query_result: &QueryResult) -> bool;
+        #[namespace = "lbug_rs"]
+        fn query_result_get_next(query_result: Pin<&mut QueryResult>) -> SharedPtr<FlatTuple>;
 
         #[namespace = "lbug_rs"]
         fn query_result_get_compiling_time(result: &QueryResult) -> f64;
         #[namespace = "lbug_rs"]
         fn query_result_get_execution_time(result: &QueryResult) -> f64;
-        fn getNumColumns(&self) -> usize;
-        fn getNumTuples(&self) -> u64;
+        #[namespace = "lbug_rs"]
+        fn query_result_get_num_columns(result: &QueryResult) -> usize;
+        #[namespace = "lbug_rs"]
+        fn query_result_get_num_tuples(result: &QueryResult) -> u64;
 
         #[namespace = "lbug_rs"]
         fn query_result_column_data_types(
@@ -267,7 +281,8 @@ pub(crate) mod ffi {
     unsafe extern "C++" {
         type FlatTuple;
 
-        fn len(&self) -> u32;
+        #[namespace = "lbug_rs"]
+        fn flat_tuple_len(tuple: &FlatTuple) -> u32;
         #[namespace = "lbug_rs"]
         fn flat_tuple_get_value(tuple: &FlatTuple, index: u32) -> &Value;
     }
@@ -276,9 +291,6 @@ pub(crate) mod ffi {
     unsafe extern "C++" {
         #[namespace = "lbug::common"]
         type LogicalType;
-
-        #[namespace = "lbug::common"]
-        fn getLogicalTypeID(&self) -> LogicalTypeID;
 
         fn create_logical_type(id: LogicalTypeID) -> UniquePtr<LogicalType>;
         fn create_logical_type_list(child_type: UniquePtr<LogicalType>) -> UniquePtr<LogicalType>;
@@ -310,13 +322,14 @@ pub(crate) mod ffi {
 
         fn logical_type_get_decimal_precision(value: &LogicalType) -> u32;
         fn logical_type_get_decimal_scale(value: &LogicalType) -> u32;
+        fn logical_type_get_logical_type_id(value: &LogicalType) -> LogicalTypeID;
     }
 
     #[namespace = "lbug_rs"]
     unsafe extern "C++" {
         type ValueListBuilder;
 
-        fn insert(self: Pin<&mut ValueListBuilder>, value: UniquePtr<Value>);
+        fn value_list_insert(value_list: Pin<&mut ValueListBuilder>, value: UniquePtr<Value>);
         fn get_list_value(
             typ: UniquePtr<LogicalType>,
             value: UniquePtr<ValueListBuilder>,
@@ -328,7 +341,7 @@ pub(crate) mod ffi {
     unsafe extern "C++" {
         type TypeListBuilder;
 
-        fn insert(self: Pin<&mut TypeListBuilder>, typ: UniquePtr<LogicalType>);
+        fn type_list_insert(type_list: Pin<&mut TypeListBuilder>, typ: UniquePtr<LogicalType>);
         fn create_type_list() -> UniquePtr<TypeListBuilder>;
     }
 
@@ -341,28 +354,17 @@ pub(crate) mod ffi {
         #[allow(dead_code)]
         fn value_to_string(node_value: &Value) -> String;
 
-        #[rust_name = "get_value_bool"]
-        fn getValue(&self) -> bool;
-        #[rust_name = "get_value_i8"]
-        fn getValue(&self) -> i8;
-        #[rust_name = "get_value_i16"]
-        fn getValue(&self) -> i16;
-        #[rust_name = "get_value_i32"]
-        fn getValue(&self) -> i32;
-        #[rust_name = "get_value_i64"]
-        fn getValue(&self) -> i64;
-        #[rust_name = "get_value_u8"]
-        fn getValue(&self) -> u8;
-        #[rust_name = "get_value_u16"]
-        fn getValue(&self) -> u16;
-        #[rust_name = "get_value_u32"]
-        fn getValue(&self) -> u32;
-        #[rust_name = "get_value_u64"]
-        fn getValue(&self) -> u64;
-        #[rust_name = "get_value_float"]
-        fn getValue(&self) -> f32;
-        #[rust_name = "get_value_double"]
-        fn getValue(&self) -> f64;
+        fn value_get_bool(value: &Value) -> bool;
+        fn value_get_i8(value: &Value) -> i8;
+        fn value_get_i16(value: &Value) -> i16;
+        fn value_get_i32(value: &Value) -> i32;
+        fn value_get_i64(value: &Value) -> i64;
+        fn value_get_u8(value: &Value) -> u8;
+        fn value_get_u16(value: &Value) -> u16;
+        fn value_get_u32(value: &Value) -> u32;
+        fn value_get_u64(value: &Value) -> u64;
+        fn value_get_float(value: &Value) -> f32;
+        fn value_get_double(value: &Value) -> f64;
 
         fn value_get_string(value: &Value) -> &CxxString;
         fn value_get_interval_secs(value: &Value) -> i64;
@@ -383,7 +385,7 @@ pub(crate) mod ffi {
         fn value_get_children_size(value: &Value) -> u32;
         fn value_get_child(value: &Value, index: u32) -> &Value;
 
-        fn isNull(&self) -> bool;
+        fn value_is_null(value: &Value) -> bool;
 
         #[rust_name = "create_value_bool"]
         fn create_value(value: bool) -> UniquePtr<Value>;

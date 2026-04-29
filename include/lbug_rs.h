@@ -32,6 +32,9 @@ struct TypeListBuilder {
 };
 
 std::unique_ptr<TypeListBuilder> create_type_list();
+inline void type_list_insert(TypeListBuilder& list, std::unique_ptr<lbug::common::LogicalType> type) {
+    list.insert(std::move(type));
+}
 
 struct QueryParams {
     std::unordered_map<std::string, std::unique_ptr<lbug::common::Value>> inputParams;
@@ -42,6 +45,10 @@ struct QueryParams {
 };
 
 std::unique_ptr<QueryParams> new_params();
+inline void query_params_insert(QueryParams& params, const rust::Str key,
+    std::unique_ptr<lbug::common::Value> value) {
+    params.insert(key, std::move(value));
+}
 
 std::unique_ptr<lbug::common::LogicalType> create_logical_type(lbug::common::LogicalTypeID id);
 std::unique_ptr<lbug::common::LogicalType> create_logical_type_list(
@@ -93,6 +100,10 @@ inline uint32_t logical_type_get_decimal_precision(const lbug::common::LogicalTy
 inline uint32_t logical_type_get_decimal_scale(const lbug::common::LogicalType& logicalType) {
     return lbug::common::DecimalType::getScale(logicalType);
 }
+inline lbug::common::LogicalTypeID logical_type_get_logical_type_id(
+    const lbug::common::LogicalType& logicalType) {
+    return logicalType.getLogicalTypeID();
+}
 
 /* Database */
 std::unique_ptr<lbug::main::Database> new_database(std::string_view databasePath,
@@ -110,6 +121,23 @@ inline std::unique_ptr<lbug::main::QueryResult> connection_query(lbug::main::Con
     std::string_view query) {
     return connection.query(query);
 }
+inline std::unique_ptr<lbug::main::PreparedStatement> connection_prepare(
+    lbug::main::Connection& connection, std::string_view query) {
+    return connection.prepare(query);
+}
+inline uint64_t connection_get_max_num_thread_for_exec(lbug::main::Connection& connection) {
+    return connection.getMaxNumThreadForExec();
+}
+inline void connection_set_max_num_thread_for_exec(lbug::main::Connection& connection,
+    uint64_t numThreads) {
+    connection.setMaxNumThreadForExec(numThreads);
+}
+inline void connection_interrupt(lbug::main::Connection& connection) {
+    connection.interrupt();
+}
+inline void connection_set_query_timeout(lbug::main::Connection& connection, uint64_t timeoutMs) {
+    connection.setQueryTimeOut(timeoutMs);
+}
 
 /* PreparedStatement */
 rust::String prepared_statement_error_message(const lbug::main::PreparedStatement& statement);
@@ -117,13 +145,32 @@ inline lbug::common::StatementType prepared_statement_get_statement_type(
     const lbug::main::PreparedStatement& statement) {
     return statement.getStatementType();
 }
+inline bool prepared_statement_is_success(const lbug::main::PreparedStatement& statement) {
+    return statement.isSuccess();
+}
 
 /* QueryResult */
 rust::String query_result_to_string(const lbug::main::QueryResult& result);
 rust::String query_result_get_error_message(const lbug::main::QueryResult& result);
+inline bool query_result_is_success(const lbug::main::QueryResult& result) {
+    return result.isSuccess();
+}
+inline bool query_result_has_next(const lbug::main::QueryResult& result) {
+    return result.hasNext();
+}
+inline std::shared_ptr<lbug::processor::FlatTuple> query_result_get_next(
+    lbug::main::QueryResult& result) {
+    return result.getNext();
+}
 
 double query_result_get_compiling_time(const lbug::main::QueryResult& result);
 double query_result_get_execution_time(const lbug::main::QueryResult& result);
+inline size_t query_result_get_num_columns(const lbug::main::QueryResult& result) {
+    return result.getNumColumns();
+}
+inline uint64_t query_result_get_num_tuples(const lbug::main::QueryResult& result) {
+    return result.getNumTuples();
+}
 
 std::unique_ptr<std::vector<lbug::common::LogicalType>> query_result_column_data_types(
     const lbug::main::QueryResult& query_result);
@@ -156,6 +203,7 @@ const lbug::common::Value& recursive_rel_get_nodes(const lbug::common::Value& va
 const lbug::common::Value& recursive_rel_get_rels(const lbug::common::Value& val);
 
 /* FlatTuple */
+uint32_t flat_tuple_len(const lbug::processor::FlatTuple& flatTuple);
 const lbug::common::Value& flat_tuple_get_value(const lbug::processor::FlatTuple& flatTuple,
     uint32_t index);
 
@@ -185,6 +233,42 @@ inline lbug::common::PhysicalTypeID value_get_physical_type(const lbug::common::
     return value.getDataType().getPhysicalType();
 }
 rust::String value_to_string(const lbug::common::Value& val);
+inline bool value_get_bool(const lbug::common::Value& value) {
+    return value.getValue<bool>();
+}
+inline int8_t value_get_i8(const lbug::common::Value& value) {
+    return value.getValue<int8_t>();
+}
+inline int16_t value_get_i16(const lbug::common::Value& value) {
+    return value.getValue<int16_t>();
+}
+inline int32_t value_get_i32(const lbug::common::Value& value) {
+    return value.getValue<int32_t>();
+}
+inline int64_t value_get_i64(const lbug::common::Value& value) {
+    return value.getValue<int64_t>();
+}
+inline uint8_t value_get_u8(const lbug::common::Value& value) {
+    return value.getValue<uint8_t>();
+}
+inline uint16_t value_get_u16(const lbug::common::Value& value) {
+    return value.getValue<uint16_t>();
+}
+inline uint32_t value_get_u32(const lbug::common::Value& value) {
+    return value.getValue<uint32_t>();
+}
+inline uint64_t value_get_u64(const lbug::common::Value& value) {
+    return value.getValue<uint64_t>();
+}
+inline float value_get_float(const lbug::common::Value& value) {
+    return value.getValue<float>();
+}
+inline double value_get_double(const lbug::common::Value& value) {
+    return value.getValue<double>();
+}
+inline bool value_is_null(const lbug::common::Value& value) {
+    return value.isNull();
+}
 
 std::unique_ptr<lbug::common::Value> create_value_string(lbug::common::LogicalTypeID typ,
     const rust::Slice<const unsigned char> value);
@@ -237,6 +321,9 @@ struct ValueListBuilder {
 std::unique_ptr<lbug::common::Value> get_list_value(std::unique_ptr<lbug::common::LogicalType> typ,
     std::unique_ptr<ValueListBuilder> value);
 std::unique_ptr<ValueListBuilder> create_list();
+inline void value_list_insert(ValueListBuilder& list, std::unique_ptr<lbug::common::Value> value) {
+    list.insert(std::move(value));
+}
 
 inline std::string_view string_view_from_str(rust::Str s) {
     return {s.data(), s.size()};

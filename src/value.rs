@@ -433,21 +433,21 @@ impl TryFrom<&ffi::Value> for Value {
             (i128::from(low)) + ((i128::from(high)) << 64)
         }
 
-        if value.isNull() {
+        if ffi::value_is_null(value) {
             return Ok(Value::Null(value.into()));
         }
 
         match ffi::value_get_data_type_id(value) {
             LogicalTypeID::ANY => unimplemented!(),
-            LogicalTypeID::BOOL => Ok(Value::Bool(value.get_value_bool())),
-            LogicalTypeID::INT8 => Ok(Value::Int8(value.get_value_i8())),
-            LogicalTypeID::INT16 => Ok(Value::Int16(value.get_value_i16())),
-            LogicalTypeID::INT32 => Ok(Value::Int32(value.get_value_i32())),
-            LogicalTypeID::INT64 => Ok(Value::Int64(value.get_value_i64())),
-            LogicalTypeID::UINT8 => Ok(Value::UInt8(value.get_value_u8())),
-            LogicalTypeID::UINT16 => Ok(Value::UInt16(value.get_value_u16())),
-            LogicalTypeID::UINT32 => Ok(Value::UInt32(value.get_value_u32())),
-            LogicalTypeID::UINT64 => Ok(Value::UInt64(value.get_value_u64())),
+            LogicalTypeID::BOOL => Ok(Value::Bool(ffi::value_get_bool(value))),
+            LogicalTypeID::INT8 => Ok(Value::Int8(ffi::value_get_i8(value))),
+            LogicalTypeID::INT16 => Ok(Value::Int16(ffi::value_get_i16(value))),
+            LogicalTypeID::INT32 => Ok(Value::Int32(ffi::value_get_i32(value))),
+            LogicalTypeID::INT64 => Ok(Value::Int64(ffi::value_get_i64(value))),
+            LogicalTypeID::UINT8 => Ok(Value::UInt8(ffi::value_get_u8(value))),
+            LogicalTypeID::UINT16 => Ok(Value::UInt16(ffi::value_get_u16(value))),
+            LogicalTypeID::UINT32 => Ok(Value::UInt32(ffi::value_get_u32(value))),
+            LogicalTypeID::UINT64 => Ok(Value::UInt64(ffi::value_get_u64(value))),
             LogicalTypeID::INT128 => Ok(Value::Int128(get_i128(value))),
             #[allow(clippy::cast_sign_loss)]
             LogicalTypeID::UUID => Ok(Value::UUID(uuid::Uuid::from_u128(
@@ -455,8 +455,8 @@ impl TryFrom<&ffi::Value> for Value {
                 // they are u128
                 get_i128(value) as u128 ^ (1 << 127),
             ))),
-            LogicalTypeID::FLOAT => Ok(Value::Float(value.get_value_float())),
-            LogicalTypeID::DOUBLE => Ok(Value::Double(value.get_value_double())),
+            LogicalTypeID::FLOAT => Ok(Value::Float(ffi::value_get_float(value))),
+            LogicalTypeID::DOUBLE => Ok(Value::Double(ffi::value_get_double(value))),
             LogicalTypeID::STRING => Ok(Value::String(ffi::value_get_string(value).to_string())),
             LogicalTypeID::BLOB => Ok(Value::Blob(
                 ffi::value_get_string(value).as_bytes().to_vec(),
@@ -560,7 +560,7 @@ impl TryFrom<&ffi::Value> for Value {
             }
             LogicalTypeID::NODE => {
                 let id = ffi::node_value_get_node_id(value);
-                if id.isNull() {
+                if ffi::value_is_null(id) {
                     return Ok(Value::Null(value.into()));
                 }
                 let id = ffi::value_get_internal_id(id);
@@ -581,7 +581,7 @@ impl TryFrom<&ffi::Value> for Value {
             }
             LogicalTypeID::REL => {
                 let src_node = ffi::rel_value_get_src_id(value);
-                if (src_node).isNull() {
+                if ffi::value_is_null(src_node) {
                     return Ok(Value::Null(value.into()));
                 }
                 let src_node = ffi::value_get_internal_id(src_node);
@@ -663,10 +663,10 @@ impl TryFrom<&ffi::Value> for Value {
                 {
                     let decimal_value: i128 = match ffi::value_get_physical_type(value) {
                         PhysicalTypeID::INT128 => get_i128(value),
-                        PhysicalTypeID::INT64 => i128::from(value.get_value_i64()),
-                        PhysicalTypeID::INT32 => i128::from(value.get_value_i32()),
-                        PhysicalTypeID::INT16 => i128::from(value.get_value_i16()),
-                        PhysicalTypeID::INT8 => i128::from(value.get_value_i8()),
+                        PhysicalTypeID::INT64 => i128::from(ffi::value_get_i64(value)),
+                        PhysicalTypeID::INT32 => i128::from(ffi::value_get_i32(value)),
+                        PhysicalTypeID::INT16 => i128::from(ffi::value_get_i16(value)),
+                        PhysicalTypeID::INT8 => i128::from(ffi::value_get_i8(value)),
                         _ => unreachable!(),
                     };
                     Ok(Value::Decimal(rust_decimal::Decimal::from_i128_with_scale(
@@ -788,7 +788,7 @@ impl TryInto<cxx::UniquePtr<ffi::Value>> for Value {
             Value::List(typ, value) => {
                 let mut builder = ffi::create_list();
                 for elem in value {
-                    builder.pin_mut().insert(elem.try_into()?);
+                    ffi::value_list_insert(builder.pin_mut(), elem.try_into()?);
                 }
                 Ok(ffi::get_list_value(
                     (&LogicalType::List {
@@ -808,10 +808,10 @@ impl TryInto<cxx::UniquePtr<ffi::Value>> for Value {
                 };
                 for (key, value) in values {
                     let mut pair = ffi::create_list();
-                    pair.pin_mut().insert(key.try_into()?);
-                    pair.pin_mut().insert(value.try_into()?);
+                    ffi::value_list_insert(pair.pin_mut(), key.try_into()?);
+                    ffi::value_list_insert(pair.pin_mut(), value.try_into()?);
                     let pair_value = ffi::get_list_value((&list_type).into(), pair);
-                    builder.pin_mut().insert(pair_value);
+                    ffi::value_list_insert(builder.pin_mut(), pair_value);
                 }
                 Ok(ffi::get_list_value(
                     (&LogicalType::Map {
@@ -826,7 +826,7 @@ impl TryInto<cxx::UniquePtr<ffi::Value>> for Value {
                 let mut builder = ffi::create_list();
                 let len = value.len();
                 for elem in value {
-                    builder.pin_mut().insert(elem.try_into()?);
+                    ffi::value_list_insert(builder.pin_mut(), elem.try_into()?);
                 }
                 Ok(ffi::get_list_value(
                     (&LogicalType::Array {
@@ -847,7 +847,7 @@ impl TryInto<cxx::UniquePtr<ffi::Value>> for Value {
 
                 let mut builder = ffi::create_list();
                 for (_, elem) in value {
-                    builder.pin_mut().insert(elem.try_into()?);
+                    ffi::value_list_insert(builder.pin_mut(), elem.try_into()?);
                 }
 
                 Ok(ffi::get_list_value((&typ).into(), builder))
@@ -862,7 +862,7 @@ impl TryInto<cxx::UniquePtr<ffi::Value>> for Value {
             }
             Value::Union { types, value } => {
                 let mut builder = ffi::create_list();
-                builder.pin_mut().insert((*value).try_into()?);
+                ffi::value_list_insert(builder.pin_mut(), (*value).try_into()?);
 
                 Ok(ffi::get_list_value(
                     (&LogicalType::Union { types }).into(),
