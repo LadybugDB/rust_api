@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 LBUG_RS_ROOT = Path(__file__).parent
-LBUG_ROOT = LBUG_RS_ROOT.parent.parent
+LBUG_ROOT = LBUG_RS_ROOT.parent / "ladybug"
 
 
 def get_lbug_version():
