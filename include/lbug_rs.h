@@ -18,6 +18,7 @@
 #include "storage/storage_version_info.h"
 #else
 #include <lbug.hpp>
+#include "common/enums/statement_type.h"
 #endif
 
 namespace lbug_rs {
