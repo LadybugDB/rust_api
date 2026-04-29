@@ -9,6 +9,9 @@ fn main() -> Result<(), Error> {
     )?;
     let connection = Connection::new(&db)?;
 
+    // Load the full-text search extension.
+    connection.query("install fts; load fts;")?;
+
     // Create schema.
     connection.query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")?;
     // Create nodes.
