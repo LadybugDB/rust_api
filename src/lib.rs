@@ -22,14 +22,20 @@
 //! ```
 //! ## Building
 //!
-//! By default, the Lbug C++ library will be compiled from source and statically linked.
+//! By default, the build downloads a precompiled static `liblbug` archive and links it into this
+//! crate. If a precompiled archive is unavailable, the Lbug C++ library will be compiled from
+//! source and statically linked.
 //!
 //! If you want to instead link against a pre-built version of the library, the following environment
 //! variables can be used to configure the build process:
 //!
 //! - `LBUG_SHARED`: If set, link dynamically instead of statically
+//! - `LBUG_SOURCE_DIR`: Directory of a Lbug source checkout to use for C++ headers when linking a
+//!   precompiled archive or falling back to a source build. Defaults to `../ladybug` when present.
 //! - `LBUG_INCLUDE_DIR`: Directory of Lbug's headers
 //! - `LBUG_LIBRARY_DIR`: Directory containing Lbug's pre-built libraries.
+//! - `LBUG_BUILD_FROM_SOURCE` or `LBUG_RUST_BUILD_FROM_SOURCE`: If set, skip downloading a
+//!   precompiled `liblbug` and build from source.
 //!
 //! Example:
 //! ```bash

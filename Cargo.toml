@@ -15,6 +15,7 @@ edition = "2021"
 # Only include files required to build to keep the crate size small
 include = [
     "build.rs",
+    "/scripts",
     "/src",
     "/include",
     # If more files are added to lbug-src, they should also be added to the rerun-if-changed
