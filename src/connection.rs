@@ -98,15 +98,12 @@ impl<'a> Connection<'a> {
     /// # Arguments
     /// * `num_threads`: The maximum number of threads to use for execution in the current connection
     pub fn set_max_num_threads_for_exec(&mut self, num_threads: u64) {
-        self.conn
-            .get_mut()
-            .pin_mut()
-            .setMaxNumThreadForExec(num_threads);
+        ffi::connection_set_max_num_thread_for_exec(self.conn.get_mut().pin_mut(), num_threads);
     }
 
     /// Returns the maximum number of threads used for execution in the current connection
     pub fn get_max_num_threads_for_exec(&self) -> u64 {
-        unsafe { (*self.conn.get()).pin_mut().getMaxNumThreadForExec() }
+        ffi::connection_get_max_num_thread_for_exec(unsafe { (*self.conn.get()).pin_mut() })
     }
 
     /// Prepares the given query and returns the prepared statement. [`PreparedStatement`]s can be run
@@ -116,9 +113,11 @@ impl<'a> Connection<'a> {
     /// * `query`: The query to prepare. See <https://ladybugdb.com/docs/cypher> for details on the
     ///   query format.
     pub fn prepare(&self, query: &str) -> Result<PreparedStatement, Error> {
-        let statement =
-            unsafe { (*self.conn.get()).pin_mut() }.prepare(ffi::StringView::new(query))?;
-        if statement.isSuccess() {
+        let statement = ffi::connection_prepare(
+            unsafe { (*self.conn.get()).pin_mut() },
+            ffi::StringView::new(query),
+        )?;
+        if ffi::prepared_statement_is_success(&statement) {
             Ok(PreparedStatement { statement })
         } else {
             Err(Error::FailedPreparedStatement(
@@ -143,7 +142,7 @@ impl<'a> Connection<'a> {
     pub fn query(&self, query: &str) -> Result<QueryResult<'a>, Error> {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
         let result = ffi::connection_query(conn, ffi::StringView::new(query))?;
-        if result.isSuccess() {
+        if ffi::query_result_is_success(&result) {
             Ok(QueryResult { result })
         } else {
             Err(Error::FailedQuery(ffi::query_result_get_error_message(
@@ -186,12 +185,12 @@ impl<'a> Connection<'a> {
         let mut cxx_params = ffi::new_params();
         for (key, value) in params {
             let ffi_value: cxx::UniquePtr<ffi::Value> = value.try_into()?;
-            cxx_params.pin_mut().insert(key, ffi_value);
+            ffi::query_params_insert(cxx_params.pin_mut(), key, ffi_value);
         }
         let conn = unsafe { (*self.conn.get()).pin_mut() };
         let result =
             ffi::connection_execute(conn, prepared_statement.statement.pin_mut(), cxx_params)?;
-        if result.isSuccess() {
+        if ffi::query_result_is_success(&result) {
             Ok(QueryResult { result })
         } else {
             Err(Error::FailedQuery(ffi::query_result_get_error_message(
@@ -203,7 +202,7 @@ impl<'a> Connection<'a> {
     /// Interrupts all queries currently executing within this connection
     pub fn interrupt(&self) -> Result<(), Error> {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
-        Ok(conn.interrupt()?)
+        Ok(ffi::connection_interrupt(conn)?)
     }
 
     /// Sets the query timeout value of the current connection
@@ -211,7 +210,7 @@ impl<'a> Connection<'a> {
     /// A value of zero (the default) disables the timeout.
     pub fn set_query_timeout(&self, timeout_ms: u64) {
         let conn = unsafe { (*self.conn.get()).pin_mut() };
-        conn.setQueryTimeOut(timeout_ms);
+        ffi::connection_set_query_timeout(conn, timeout_ms);
     }
 }
 

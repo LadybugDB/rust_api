@@ -70,8 +70,8 @@
 
 pub use connection::{Connection, PreparedStatement};
 pub use database::{Database, SystemConfig};
-pub use ffi::ffi::StatementType;
 pub use error::Error;
+pub use ffi::ffi::StatementType;
 pub use logical_type::LogicalType;
 #[cfg(feature = "arrow")]
 pub use query_result::ArrowIterator;

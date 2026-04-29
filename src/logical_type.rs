@@ -99,7 +99,7 @@ impl From<&ffi::Value> for LogicalType {
 impl From<&ffi::LogicalType> for LogicalType {
     fn from(logical_type: &ffi::LogicalType) -> Self {
         use ffi::LogicalTypeID;
-        match logical_type.getLogicalTypeID() {
+        match ffi::logical_type_get_logical_type_id(logical_type) {
             LogicalTypeID::ANY => LogicalType::Any,
             LogicalTypeID::BOOL => LogicalType::Bool,
             LogicalTypeID::SERIAL => LogicalType::Serial,
@@ -243,7 +243,7 @@ impl From<&LogicalType> for cxx::UniquePtr<ffi::LogicalType> {
                 let mut names = vec![];
                 for (name, typ) in fields {
                     names.push(name.clone());
-                    builder.pin_mut().insert(typ.into());
+                    ffi::type_list_insert(builder.pin_mut(), typ.into());
                 }
                 ffi::create_logical_type_struct(&names, builder)
             }
@@ -252,7 +252,7 @@ impl From<&LogicalType> for cxx::UniquePtr<ffi::LogicalType> {
                 let mut names = vec![];
                 for (name, typ) in types {
                     names.push(name.clone());
-                    builder.pin_mut().insert(typ.into());
+                    ffi::type_list_insert(builder.pin_mut(), typ.into());
                 }
                 ffi::create_logical_type_union(&names, builder)
             }

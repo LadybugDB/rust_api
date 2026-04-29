@@ -70,14 +70,14 @@ impl<'db> QueryResult<'db> {
     ///
     /// This corresponds to the length of each result vector yielded by the iterator.
     pub fn get_num_columns(&self) -> usize {
-        self.result.as_ref().unwrap().getNumColumns()
+        ffi::query_result_get_num_columns(self.result.as_ref().unwrap())
     }
     /// Returns the number of tuples in the query result.
     ///
     /// This corresponds to the total number of result
     /// vectors that the query result iterator will yield.
     pub fn get_num_tuples(&self) -> u64 {
-        self.result.as_ref().unwrap().getNumTuples()
+        ffi::query_result_get_num_tuples(self.result.as_ref().unwrap())
     }
 
     /// Returns the name of each column in the query result
@@ -120,10 +120,10 @@ impl Iterator for QueryResult<'_> {
     type Item = Vec<Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.result.as_ref().unwrap().hasNext() {
-            let flat_tuple = self.result.pin_mut().getNext();
+        if ffi::query_result_has_next(self.result.as_ref().unwrap()) {
+            let flat_tuple = ffi::query_result_get_next(self.result.pin_mut());
             let mut result = vec![];
-            for i in 0..flat_tuple.as_ref().unwrap().len() {
+            for i in 0..ffi::flat_tuple_len(flat_tuple.as_ref().unwrap()) {
                 let value = ffi::flat_tuple_get_value(flat_tuple.as_ref().unwrap(), i);
                 // TODO: Return result instead of unwrapping?
                 // Unfortunately, as an iterator, this would require producing
@@ -156,7 +156,7 @@ impl Iterator for ArrowIterator<'_, '_> {
     type Item = arrow::record_batch::RecordBatch;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.result.as_ref().unwrap().hasNext() {
+        if ffi::query_result_has_next(self.result.as_ref().unwrap()) {
             use crate::ffi::arrow::ffi_arrow;
             // Generally this panic should be unreachable, since the only exceptions produced by
             // arrow_converter are for unsupported types, but those would produce an error when we
